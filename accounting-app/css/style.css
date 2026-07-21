@@ -587,14 +587,86 @@ body {
     background: var(--primary-color);
 }
 
-/* 用户信息样式 */
-.user-info {
+/* 用户下拉菜单样式 */
+.user-dropdown {
+    position: relative;
+    margin-right: 0.5rem;
+}
+
+.user-info-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
     color: white;
     font-size: 0.9rem;
-    padding: 0.5rem 0.75rem;
+    padding: 0.5rem 0.875rem;
     background: rgba(255, 255, 255, 0.15);
+    border: none;
     border-radius: 20px;
-    margin-right: 0.5rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.user-info-btn:hover {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+.dropdown-arrow {
+    font-size: 0.6rem;
+    opacity: 0.8;
+    transition: transform 0.2s;
+}
+
+.user-dropdown.open .dropdown-arrow {
+    transform: rotate(180deg);
+}
+
+.dropdown-menu {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    min-width: 140px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+    padding: 0.5rem;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-10px);
+    transition: all 0.2s ease;
+    z-index: 200;
+}
+
+[data-theme="dark"] .dropdown-menu {
+    background: #1e293b;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+}
+
+.user-dropdown.open .dropdown-menu {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
+.dropdown-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border: none;
+    background: none;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    text-align: left;
+}
+
+.dropdown-item:hover {
+    background: var(--bg-color);
+    color: var(--expense-color);
 }
 
 /* 登录注册页面 */

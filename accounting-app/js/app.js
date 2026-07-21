@@ -320,8 +320,31 @@ class AccountingApp {
     
     // 绑定应用事件
     bindAppEvents() {
+        // 用户下拉菜单
+        const userDropdown = document.getElementById('userDropdown');
+        const userInfoBtn = document.getElementById('userInfoBtn');
+        
+        // 点击用户名切换菜单
+        userInfoBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            userDropdown.classList.toggle('open');
+        });
+
+        // 点击页面其他地方关闭菜单
+        document.addEventListener('click', () => {
+            userDropdown.classList.remove('open');
+        });
+
+        // 阻止菜单内部点击冒泡
+        document.getElementById('dropdownMenu').addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+
         // 退出登录
-        document.getElementById('logoutBtn').addEventListener('click', () => this.handleLogout());
+        document.getElementById('logoutBtn').addEventListener('click', () => {
+            userDropdown.classList.remove('open');
+            this.handleLogout();
+        });
 
         // 添加记录按钮
         document.getElementById('addRecordBtn').addEventListener('click', () => this.openModal());

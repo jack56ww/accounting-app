@@ -72,11 +72,20 @@
             <div class="header-content">
                 <h1 class="logo">💰 随心记账</h1>
                 <div class="header-actions">
-                    <span class="user-info" id="userInfo">👤 <span id="currentUsername"></span></span>
+                    <div class="user-dropdown" id="userDropdown">
+                        <button class="user-info-btn" id="userInfoBtn">
+                            👤 <span id="currentUsername"></span>
+                            <span class="dropdown-arrow">▼</span>
+                        </button>
+                        <div class="dropdown-menu" id="dropdownMenu">
+                            <button class="dropdown-item" id="logoutBtn">
+                                🚪 退出登录
+                            </button>
+                        </div>
+                    </div>
                     <button id="themeToggle" class="btn-icon" title="切换主题">🌙</button>
                     <button id="exportBtn" class="btn-icon" title="导出数据">📤</button>
                     <button id="importBtn" class="btn-icon" title="导入数据">📥</button>
-                    <button id="logoutBtn" class="btn-icon" title="退出登录">🚪</button>
                     <input type="file" id="importFile" accept=".json,.csv" style="display: none;">
                 </div>
             </div>
