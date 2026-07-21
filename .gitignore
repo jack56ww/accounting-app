@@ -44,3 +44,14 @@ build/
 # Git便携版（本地使用，不提交）
 Git/
 PortableGit.exe
+
+# npm缓存
+npm-cache/
+accounting-desktop/npm-cache/
+
+# 本地测试数据文件
+users.json
+user_*.json
+
+# 桌面版node_modules
+accounting-desktop/node_modules/
