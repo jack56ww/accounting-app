@@ -1,6 +1,121 @@
+// 用户认证管理类
+class AuthManager {
+    constructor() {
+        this.currentUser = null;
+        this.SALT_PREFIX = 'accounting_app_salt_';
+    }
+
+    // 密码加密：SHA-256 + 盐值
+    hashPassword(password, salt) {
+        const saltedPassword = this.SALT_PREFIX + salt + password;
+        return CryptoJS.SHA256(saltedPassword).toString();
+    }
+
+    // 生成随机盐值
+    generateSalt() {
+        return CryptoJS.lib.WordArray.random(16).toString();
+    }
+
+    // 获取所有用户
+    getUsers() {
+        const users = localStorage.getItem('accounting_users');
+        return users ? JSON.parse(users) : {};
+    }
+
+    // 保存用户列表
+    saveUsers(users) {
+        localStorage.setItem('accounting_users', JSON.stringify(users));
+    }
+
+    // 注册用户
+    register(username, password) {
+        const users = this.getUsers();
+        
+        // 验证用户名
+        if (!username || username.length < 3 || username.length > 20) {
+            return { success: false, message: '用户名长度需在3-20位之间' };
+        }
+        if (!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(username)) {
+            return { success: false, message: '用户名只能包含字母、数字、下划线和中文' };
+        }
+        
+        // 验证密码
+        if (!password || password.length < 6) {
+            return { success: false, message: '密码长度至少6位' };
+        }
+
+        // 检查用户是否存在
+        if (users[username]) {
+            return { success: false, message: '用户名已存在' };
+        }
+
+        // 创建用户，密码加盐哈希存储
+        const salt = this.generateSalt();
+        users[username] = {
+            username,
+            passwordHash: this.hashPassword(password, salt),
+            salt,
+            createdAt: new Date().toISOString()
+        };
+
+        this.saveUsers(users);
+        return { success: true, message: '注册成功' };
+    }
+
+    // 登录验证
+    login(username, password) {
+        const users = this.getUsers();
+        const user = users[username];
+
+        if (!user) {
+            return { success: false, message: '用户名或密码错误' };
+        }
+
+        const hash = this.hashPassword(password, user.salt);
+        if (hash !== user.passwordHash) {
+            return { success: false, message: '用户名或密码错误' };
+        }
+
+        // 登录成功，保存登录状态
+        this.currentUser = username;
+        localStorage.setItem('accounting_current_user', username);
+        return { success: true, message: '登录成功' };
+    }
+
+    // 退出登录
+    logout() {
+        this.currentUser = null;
+        localStorage.removeItem('accounting_current_user');
+    }
+
+    // 检查登录状态
+    checkLogin() {
+        const savedUser = localStorage.getItem('accounting_current_user');
+        if (savedUser) {
+            const users = this.getUsers();
+            if (users[savedUser]) {
+                this.currentUser = savedUser;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // 获取当前用户
+    getCurrentUser() {
+        return this.currentUser;
+    }
+
+    // 获取用户数据存储key
+    getUserDataKey(type) {
+        return `accounting_${type}_${this.currentUser}`;
+    }
+}
+
 // 记账应用主逻辑
 class AccountingApp {
     constructor() {
+        this.auth = new AuthManager();
         this.records = [];
         this.budget = 0;
         this.currentType = 'expense';
@@ -35,39 +150,179 @@ class AccountingApp {
     }
     
     init() {
+        // 检查登录状态
+        if (this.auth.checkLogin()) {
+            this.showApp();
+        } else {
+            this.showAuth();
+        }
+        
+        this.bindAuthEvents();
+    }
+
+    // 显示登录页面
+    showAuth() {
+        document.getElementById('authPage').style.display = 'flex';
+        document.getElementById('appContainer').style.display = 'none';
+    }
+
+    // 显示主应用
+    showApp() {
+        document.getElementById('authPage').style.display = 'none';
+        document.getElementById('appContainer').style.display = 'block';
+        document.getElementById('currentUsername').textContent = this.auth.getCurrentUser();
+        
         this.loadData();
-        this.bindEvents();
+        this.bindAppEvents();
         this.updateUI();
         this.setDefaultDate();
         this.renderCategoryOptions();
     }
+
+    // 绑定认证相关事件
+    bindAuthEvents() {
+        // 切换登录/注册
+        document.getElementById('showRegister').addEventListener('click', (e) => {
+            e.preventDefault();
+            document.getElementById('loginForm').classList.remove('active');
+            document.getElementById('registerForm').classList.add('active');
+            this.clearAuthErrors();
+        });
+
+        document.getElementById('showLogin').addEventListener('click', (e) => {
+            e.preventDefault();
+            document.getElementById('registerForm').classList.remove('active');
+            document.getElementById('loginForm').classList.add('active');
+            this.clearAuthErrors();
+        });
+
+        // 登录
+        document.getElementById('loginBtn').addEventListener('click', () => this.handleLogin());
+        document.getElementById('loginPassword').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.handleLogin();
+        });
+
+        // 注册
+        document.getElementById('registerBtn').addEventListener('click', () => this.handleRegister());
+        document.getElementById('regConfirmPassword').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.handleRegister();
+        });
+    }
+
+    // 清除错误提示
+    clearAuthErrors() {
+        document.getElementById('loginError').classList.remove('show');
+        document.getElementById('registerError').classList.remove('show');
+    }
+
+    // 显示错误
+    showError(elementId, message) {
+        const el = document.getElementById(elementId);
+        el.textContent = message;
+        el.classList.add('show');
+    }
+
+    // 处理登录
+    handleLogin() {
+        const username = document.getElementById('loginUsername').value.trim();
+        const password = document.getElementById('loginPassword').value;
+
+        if (!username || !password) {
+            this.showError('loginError', '请输入用户名和密码');
+            return;
+        }
+
+        const result = this.auth.login(username, password);
+        if (result.success) {
+            this.showApp();
+        } else {
+            this.showError('loginError', result.message);
+        }
+    }
+
+    // 处理注册
+    handleRegister() {
+        const username = document.getElementById('regUsername').value.trim();
+        const password = document.getElementById('regPassword').value;
+        const confirmPassword = document.getElementById('regConfirmPassword').value;
+
+        if (!username || !password || !confirmPassword) {
+            this.showError('registerError', '请填写完整信息');
+            return;
+        }
+
+        if (password !== confirmPassword) {
+            this.showError('registerError', '两次输入的密码不一致');
+            return;
+        }
+
+        const result = this.auth.register(username, password);
+        if (result.success) {
+            // 注册成功自动登录
+            this.auth.login(username, password);
+            this.showApp();
+        } else {
+            this.showError('registerError', result.message);
+        }
+    }
+
+    // 处理退出登录
+    handleLogout() {
+        if (confirm('确定要退出登录吗？')) {
+            this.auth.logout();
+            // 清空表单
+            document.getElementById('loginUsername').value = '';
+            document.getElementById('loginPassword').value = '';
+            document.getElementById('regUsername').value = '';
+            document.getElementById('regPassword').value = '';
+            document.getElementById('regConfirmPassword').value = '';
+            this.clearAuthErrors();
+            this.showAuth();
+        }
+    }
     
-    // 从本地存储加载数据
+    // 从本地存储加载当前用户数据
     loadData() {
-        const savedRecords = localStorage.getItem('accounting_records');
-        const savedBudget = localStorage.getItem('accounting_budget');
-        const savedTheme = localStorage.getItem('accounting_theme');
+        const recordsKey = this.auth.getUserDataKey('records');
+        const budgetKey = this.auth.getUserDataKey('budget');
+        const themeKey = this.auth.getUserDataKey('theme');
+        
+        const savedRecords = localStorage.getItem(recordsKey);
+        const savedBudget = localStorage.getItem(budgetKey);
+        const savedTheme = localStorage.getItem(themeKey);
         
         if (savedRecords) {
             this.records = JSON.parse(savedRecords);
+        } else {
+            this.records = [];
         }
         if (savedBudget) {
             this.budget = parseFloat(savedBudget);
+        } else {
+            this.budget = 0;
         }
         if (savedTheme === 'dark') {
             document.documentElement.setAttribute('data-theme', 'dark');
             document.getElementById('themeToggle').textContent = '☀️';
+        } else {
+            document.documentElement.removeAttribute('data-theme');
+            document.getElementById('themeToggle').textContent = '🌙';
         }
     }
     
-    // 保存数据到本地存储
+    // 保存当前用户数据到本地存储
     saveData() {
-        localStorage.setItem('accounting_records', JSON.stringify(this.records));
-        localStorage.setItem('accounting_budget', this.budget.toString());
+        const recordsKey = this.auth.getUserDataKey('records');
+        const budgetKey = this.auth.getUserDataKey('budget');
+        localStorage.setItem(recordsKey, JSON.stringify(this.records));
+        localStorage.setItem(budgetKey, this.budget.toString());
     }
     
-    // 绑定事件
-    bindEvents() {
+    // 绑定应用事件
+    bindAppEvents() {
+        // 退出登录
+        document.getElementById('logoutBtn').addEventListener('click', () => this.handleLogout());
+
         // 添加记录按钮
         document.getElementById('addRecordBtn').addEventListener('click', () => this.openModal());
         
@@ -254,6 +509,8 @@ class AccountingApp {
     saveBudget() {
         this.budget = parseFloat(document.getElementById('budgetAmount').value) || 0;
         this.saveData();
+        const themeKey = this.auth.getUserDataKey('theme');
+        localStorage.setItem(themeKey, document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
         this.closeBudgetModal();
         this.updateUI();
     }
@@ -514,15 +771,16 @@ class AccountingApp {
     toggleTheme() {
         const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
         const btn = document.getElementById('themeToggle');
+        const themeKey = this.auth.getUserDataKey('theme');
         
         if (isDark) {
             document.documentElement.removeAttribute('data-theme');
             btn.textContent = '🌙';
-            localStorage.setItem('accounting_theme', 'light');
+            localStorage.setItem(themeKey, 'light');
         } else {
             document.documentElement.setAttribute('data-theme', 'dark');
             btn.textContent = '☀️';
-            localStorage.setItem('accounting_theme', 'dark');
+            localStorage.setItem(themeKey, 'dark');
         }
         
         this.updateCharts();
@@ -531,6 +789,7 @@ class AccountingApp {
     // 导出数据
     exportData() {
         const data = {
+            username: this.auth.getCurrentUser(),
             records: this.records,
             budget: this.budget,
             exportDate: new Date().toISOString()
@@ -540,7 +799,7 @@ class AccountingApp {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `记账数据_${new Date().toISOString().split('T')[0]}.json`;
+        a.download = `${this.auth.getCurrentUser()}_记账数据_${new Date().toISOString().split('T')[0]}.json`;
         a.click();
         URL.revokeObjectURL(url);
     }
@@ -555,7 +814,7 @@ class AccountingApp {
             try {
                 const data = JSON.parse(event.target.result);
                 if (data.records && Array.isArray(data.records)) {
-                    if (confirm('导入将覆盖现有数据，确定继续吗？')) {
+                    if (confirm(`导入将覆盖当前用户「${this.auth.getCurrentUser()}」的现有数据，确定继续吗？`)) {
                         this.records = data.records;
                         this.budget = data.budget || 0;
                         this.saveData();

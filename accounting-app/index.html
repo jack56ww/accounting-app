@@ -6,17 +6,77 @@
     <title>随心记账 - 个人财务管理助手</title>
     <link rel="stylesheet" href="css/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/crypto-js.min.js"></script>
 </head>
 <body>
-    <div class="app-container">
+    <!-- 登录/注册页面 -->
+    <div id="authPage" class="auth-page">
+        <div class="auth-container">
+            <div class="auth-card">
+                <div class="auth-logo">
+                    <span class="auth-icon">💰</span>
+                    <h1>随心记账</h1>
+                    <p>个人财务管理助手</p>
+                </div>
+
+                <!-- 登录表单 -->
+                <div id="loginForm" class="auth-form active">
+                    <h2>登录账户</h2>
+                    <div class="form-group">
+                        <label for="loginUsername">用户名</label>
+                        <input type="text" id="loginUsername" placeholder="请输入用户名" autocomplete="username">
+                    </div>
+                    <div class="form-group">
+                        <label for="loginPassword">密码</label>
+                        <input type="password" id="loginPassword" placeholder="请输入密码" autocomplete="current-password">
+                    </div>
+                    <div class="auth-error" id="loginError"></div>
+                    <button class="btn-auth" id="loginBtn">登录</button>
+                    <p class="auth-switch">
+                        还没有账户？<a href="#" id="showRegister">立即注册</a>
+                    </p>
+                </div>
+
+                <!-- 注册表单 -->
+                <div id="registerForm" class="auth-form">
+                    <h2>注册新账户</h2>
+                    <div class="form-group">
+                        <label for="regUsername">用户名</label>
+                        <input type="text" id="regUsername" placeholder="3-20位字符，支持字母数字" autocomplete="username">
+                    </div>
+                    <div class="form-group">
+                        <label for="regPassword">密码</label>
+                        <input type="password" id="regPassword" placeholder="至少6位密码" autocomplete="new-password">
+                    </div>
+                    <div class="form-group">
+                        <label for="regConfirmPassword">确认密码</label>
+                        <input type="password" id="regConfirmPassword" placeholder="请再次输入密码" autocomplete="new-password">
+                    </div>
+                    <div class="auth-error" id="registerError"></div>
+                    <button class="btn-auth" id="registerBtn">注册</button>
+                    <p class="auth-switch">
+                        已有账户？<a href="#" id="showLogin">返回登录</a>
+                    </p>
+                </div>
+            </div>
+            <div class="auth-footer">
+                <p>🔒 密码本地加密存储，数据安全可靠</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 主应用容器（登录后显示） -->
+    <div id="appContainer" class="app-container" style="display: none;">
         <!-- 顶部导航 -->
         <header class="header">
             <div class="header-content">
                 <h1 class="logo">💰 随心记账</h1>
                 <div class="header-actions">
+                    <span class="user-info" id="userInfo">👤 <span id="currentUsername"></span></span>
                     <button id="themeToggle" class="btn-icon" title="切换主题">🌙</button>
                     <button id="exportBtn" class="btn-icon" title="导出数据">📤</button>
                     <button id="importBtn" class="btn-icon" title="导入数据">📥</button>
+                    <button id="logoutBtn" class="btn-icon" title="退出登录">🚪</button>
                     <input type="file" id="importFile" accept=".json,.csv" style="display: none;">
                 </div>
             </div>
