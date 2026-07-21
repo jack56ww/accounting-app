@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>随心记账 - 个人财务管理助手</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- 顶部导航 -->
+        <header class="header">
+            <div class="header-content">
+                <h1 class="logo">💰 随心记账</h1>
+                <div class="header-actions">
+                    <button id="themeToggle" class="btn-icon" title="切换主题">🌙</button>
+                    <button id="exportBtn" class="btn-icon" title="导出数据">📤</button>
+                    <button id="importBtn" class="btn-icon" title="导入数据">📥</button>
+                    <input type="file" id="importFile" accept=".json,.csv" style="display: none;">
+                </div>
+            </div>
+        </header>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <!-- 概览卡片 -->
+            <section class="overview-section">
+                <div class="card balance-card">
+                    <div class="card-label">当前余额</div>
+                    <div class="card-amount" id="balanceAmount">¥0.00</div>
+                </div>
+                <div class="card income-card">
+                    <div class="card-label">本月收入</div>
+                    <div class="card-amount income" id="monthIncome">¥0.00</div>
+                </div>
+                <div class="card expense-card">
+                    <div class="card-label">本月支出</div>
+                    <div class="card-amount expense" id="monthExpense">¥0.00</div>
+                </div>
+            </section>
+
+            <!-- 预算进度 -->
+            <section class="budget-section card">
+                <div class="section-header">
+                    <h3>📊 本月预算</h3>
+                    <button id="setBudgetBtn" class="btn-small">设置预算</button>
+                </div>
+                <div class="budget-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="budgetProgress"></div>
+                    </div>
+                    <div class="budget-info">
+                        <span id="budgetUsed">¥0.00</span> / <span id="budgetTotal">¥0.00</span>
+                        <span id="budgetStatus" class="budget-status"></span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 添加记录按钮 -->
+            <button id="addRecordBtn" class="btn-add">+ 添加记录</button>
+
+            <!-- 统计图表 -->
+            <section class="charts-section">
+                <div class="chart-container card">
+                    <h3>📈 收支趋势</h3>
+                    <canvas id="trendChart"></canvas>
+                </div>
+                <div class="chart-container card">
+                    <h3>🥧 支出分类</h3>
+                    <canvas id="categoryChart"></canvas>
+                </div>
+            </section>
+
+            <!-- 记录列表 -->
+            <section class="records-section card">
+                <div class="section-header">
+                    <h3>📝 最近记录</h3>
+                    <select id="filterType" class="filter-select">
+                        <option value="all">全部</option>
+                        <option value="income">收入</option>
+                        <option value="expense">支出</option>
+                    </select>
+                </div>
+                <div id="recordsList" class="records-list">
+                    <div class="empty-state">暂无记录，点击"添加记录"开始记账吧！</div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- 添加/编辑记录弹窗 -->
+    <div id="recordModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">添加记录</h3>
+                <button class="modal-close" id="closeModal">&times;</button>
+            </div>
+            <form id="recordForm" class="modal-body">
+                <input type="hidden" id="recordId">
+                
+                <div class="form-group">
+                    <label>类型</label>
+                    <div class="type-toggle">
+                        <button type="button" class="type-btn active" data-type="expense">支出</button>
+                        <button type="button" class="type-btn" data-type="income">收入</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="amount">金额</label>
+                    <input type="number" id="amount" step="0.01" min="0.01" placeholder="请输入金额" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="category">分类</label>
+                    <select id="category" required>
+                        <option value="">请选择分类</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="date">日期</label>
+                    <input type="date" id="date" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="note">备注</label>
+                    <input type="text" id="note" placeholder="添加备注（选填）" maxlength="50">
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" id="cancelBtn">取消</button>
+                    <button type="submit" class="btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 设置预算弹窗 -->
+    <div id="budgetModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>设置月度预算</h3>
+                <button class="modal-close" id="closeBudgetModal">&times;</button>
+            </div>
+            <form id="budgetForm" class="modal-body">
+                <div class="form-group">
+                    <label for="budgetAmount">月度预算金额</label>
+                    <input type="number" id="budgetAmount" step="0.01" min="0" placeholder="请输入预算金额" required>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" id="cancelBudgetBtn">取消</button>
+                    <button type="submit" class="btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 遮罩层 -->
+    <div id="overlay" class="overlay"></div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
