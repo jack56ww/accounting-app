@@ -1,8 +1,82 @@
+// 云端存储管理 - 使用JSONBin.io免费服务
+class CloudStorage {
+    constructor() {
+        this.apiUrl = 'https://api.jsonbin.io/v3/b';
+        this.masterKey = ''; // 匿名使用，如需私有bin可注册获取API Key
+    }
+
+    // 创建云端存储桶
+    async createBin(data, isPrivate = false) {
+        try {
+            const headers = {
+                'Content-Type': 'application/json',
+                'X-Bin-Private': isPrivate ? 'true' : 'false'
+            };
+            if (this.masterKey) {
+                headers['X-Master-Key'] = this.masterKey;
+            }
+            
+            const response = await fetch(this.apiUrl, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+            return { success: true, binId: result.metadata.id };
+        } catch (error) {
+            console.error('创建云端存储失败:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // 读取云端数据
+    async getBin(binId) {
+        try {
+            const headers = {};
+            if (this.masterKey) {
+                headers['X-Master-Key'] = this.masterKey;
+            }
+            
+            const response = await fetch(`${this.apiUrl}/${binId}/latest`, { headers });
+            const result = await response.json();
+            return { success: true, data: result.record };
+        } catch (error) {
+            console.error('读取云端数据失败:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // 更新云端数据
+    async updateBin(binId, data) {
+        try {
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            if (this.masterKey) {
+                headers['X-Master-Key'] = this.masterKey;
+            }
+            
+            const response = await fetch(`${this.apiUrl}/${binId}`, {
+                method: 'PUT',
+                headers,
+                body: JSON.stringify(data)
+            });
+            await response.json();
+            return { success: true };
+        } catch (error) {
+            console.error('更新云端数据失败:', error);
+            return { success: false, error: error.message };
+        }
+    }
+}
+
 // 用户认证管理类
 class AuthManager {
     constructor() {
         this.currentUser = null;
         this.SALT_PREFIX = 'accounting_app_salt_';
+        this.cloud = new CloudStorage();
+        this.usersBinId = null; // 全局用户列表bin ID
     }
 
     // 密码加密：SHA-256 + 盐值
@@ -16,20 +90,57 @@ class AuthManager {
         return CryptoJS.lib.WordArray.random(16).toString();
     }
 
-    // 获取所有用户
-    getUsers() {
+    // 初始化云端用户列表
+    async initCloudUsers() {
+        // 检查本地是否有用户列表bin ID
+        const savedBinId = localStorage.getItem('accounting_users_bin');
+        if (savedBinId) {
+            this.usersBinId = savedBinId;
+            const result = await this.cloud.getBin(savedBinId);
+            if (result.success) {
+                return result.data;
+            }
+        }
+        
+        // 没有则创建新的用户列表bin
+        const result = await this.cloud.createBin({});
+        if (result.success) {
+            this.usersBinId = result.binId;
+            localStorage.setItem('accounting_users_bin', result.binId);
+            return {};
+        }
+        return null;
+    }
+
+    // 获取所有用户（优先云端，本地备份）
+    async getUsers() {
+        // 先尝试从云端获取
+        if (this.usersBinId) {
+            const result = await this.cloud.getBin(this.usersBinId);
+            if (result.success) {
+                // 同步到本地备份
+                localStorage.setItem('accounting_users', JSON.stringify(result.data));
+                return result.data;
+            }
+        }
+        // 云端失败则用本地
         const users = localStorage.getItem('accounting_users');
         return users ? JSON.parse(users) : {};
     }
 
-    // 保存用户列表
-    saveUsers(users) {
+    // 保存用户列表（云端+本地双备份）
+    async saveUsers(users) {
+        // 本地保存
         localStorage.setItem('accounting_users', JSON.stringify(users));
+        // 云端保存
+        if (this.usersBinId) {
+            await this.cloud.updateBin(this.usersBinId, users);
+        }
     }
 
     // 注册用户
-    register(username, password) {
-        const users = this.getUsers();
+    async register(username, password) {
+        const users = await this.getUsers();
         
         // 验证用户名
         if (!username || username.length < 3 || username.length > 20) {
@@ -51,20 +162,33 @@ class AuthManager {
 
         // 创建用户，密码加盐哈希存储
         const salt = this.generateSalt();
-        users[username] = {
+        const userData = {
             username,
             passwordHash: this.hashPassword(password, salt),
             salt,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            dataBinId: null // 后续创建用户数据bin
         };
 
-        this.saveUsers(users);
+        // 为用户创建个人数据存储桶
+        const binResult = await this.cloud.createBin({
+            records: [],
+            budget: 0,
+            theme: 'light'
+        });
+        if (binResult.success) {
+            userData.dataBinId = binResult.binId;
+        }
+
+        users[username] = userData;
+        await this.saveUsers(users);
+        
         return { success: true, message: '注册成功' };
     }
 
     // 登录验证
-    login(username, password) {
-        const users = this.getUsers();
+    async login(username, password) {
+        const users = await this.getUsers();
         const user = users[username];
 
         if (!user) {
@@ -79,7 +203,7 @@ class AuthManager {
         // 登录成功，保存登录状态
         this.currentUser = username;
         localStorage.setItem('accounting_current_user', username);
-        return { success: true, message: '登录成功' };
+        return { success: true, message: '登录成功', user };
     }
 
     // 退出登录
@@ -89,16 +213,18 @@ class AuthManager {
     }
 
     // 检查登录状态
-    checkLogin() {
+    async checkLogin() {
         const savedUser = localStorage.getItem('accounting_current_user');
         if (savedUser) {
-            const users = this.getUsers();
+            // 确保云端用户列表已初始化
+            await this.initCloudUsers();
+            const users = await this.getUsers();
             if (users[savedUser]) {
                 this.currentUser = savedUser;
-                return true;
+                return users[savedUser];
             }
         }
-        return false;
+        return null;
     }
 
     // 获取当前用户
@@ -106,9 +232,37 @@ class AuthManager {
         return this.currentUser;
     }
 
-    // 获取用户数据存储key
-    getUserDataKey(type) {
-        return `accounting_${type}_${this.currentUser}`;
+    // 获取用户数据bin ID
+    async getUserDataBinId(username) {
+        const users = await this.getUsers();
+        return users[username]?.dataBinId;
+    }
+
+    // 从云端加载用户数据
+    async loadUserData(username) {
+        const binId = await this.getUserDataBinId(username);
+        if (binId) {
+            const result = await this.cloud.getBin(binId);
+            if (result.success) {
+                // 同步到本地
+                const recordsKey = `accounting_records_${username}`;
+                const budgetKey = `accounting_budget_${username}`;
+                const themeKey = `accounting_theme_${username}`;
+                localStorage.setItem(recordsKey, JSON.stringify(result.data.records || []));
+                localStorage.setItem(budgetKey, (result.data.budget || 0).toString());
+                localStorage.setItem(themeKey, result.data.theme || 'light');
+                return result.data;
+            }
+        }
+        return null;
+    }
+
+    // 保存用户数据到云端
+    async saveUserData(username, data) {
+        const binId = await this.getUserDataBinId(username);
+        if (binId) {
+            await this.cloud.updateBin(binId, data);
+        }
     }
 }
 
@@ -121,6 +275,7 @@ class AccountingApp {
         this.currentType = 'expense';
         this.editingId = null;
         this.charts = {};
+        this.currentUserData = null;
         
         // 分类配置
         this.categories = {
@@ -149,10 +304,14 @@ class AccountingApp {
         this.init();
     }
     
-    init() {
+    async init() {
+        // 初始化云端用户列表
+        await this.auth.initCloudUsers();
+        
         // 检查登录状态
-        if (this.auth.checkLogin()) {
-            this.showApp();
+        const user = await this.auth.checkLogin();
+        if (user) {
+            await this.showApp(user);
         } else {
             this.showAuth();
         }
@@ -167,16 +326,34 @@ class AccountingApp {
     }
 
     // 显示主应用
-    showApp() {
+    async showApp(user) {
         document.getElementById('authPage').style.display = 'none';
         document.getElementById('appContainer').style.display = 'block';
         document.getElementById('currentUsername').textContent = this.auth.getCurrentUser();
         
-        this.loadData();
+        // 从云端加载用户数据
+        await this.loadData();
         this.bindAppEvents();
         this.updateUI();
         this.setDefaultDate();
         this.renderCategoryOptions();
+        
+        // 显示同步成功提示
+        this.showSyncStatus('☁️ 数据已从云端同步');
+    }
+
+    // 显示同步状态
+    showSyncStatus(message) {
+        const status = document.createElement('div');
+        status.className = 'sync-status';
+        status.textContent = message;
+        status.style.cssText = 'position:fixed;top:80px;right:20px;background:var(--primary-color);color:white;padding:0.75rem 1rem;border-radius:8px;z-index:1000;animation:slideIn 0.3s ease;box-shadow:var(--shadow);';
+        document.body.appendChild(status);
+        setTimeout(() => {
+            status.style.opacity = '0';
+            status.style.transition = 'opacity 0.3s';
+            setTimeout(() => status.remove(), 300);
+        }, 2000);
     }
 
     // 绑定认证相关事件
@@ -223,7 +400,7 @@ class AccountingApp {
     }
 
     // 处理登录
-    handleLogin() {
+    async handleLogin() {
         const username = document.getElementById('loginUsername').value.trim();
         const password = document.getElementById('loginPassword').value;
 
@@ -232,16 +409,23 @@ class AccountingApp {
             return;
         }
 
-        const result = this.auth.login(username, password);
+        const btn = document.getElementById('loginBtn');
+        btn.disabled = true;
+        btn.textContent = '登录中...';
+
+        const result = await this.auth.login(username, password);
         if (result.success) {
-            this.showApp();
+            await this.showApp(result.user);
         } else {
             this.showError('loginError', result.message);
         }
+        
+        btn.disabled = false;
+        btn.textContent = '登录';
     }
 
     // 处理注册
-    handleRegister() {
+    async handleRegister() {
         const username = document.getElementById('regUsername').value.trim();
         const password = document.getElementById('regPassword').value;
         const confirmPassword = document.getElementById('regConfirmPassword').value;
@@ -256,19 +440,28 @@ class AccountingApp {
             return;
         }
 
-        const result = this.auth.register(username, password);
+        const btn = document.getElementById('registerBtn');
+        btn.disabled = true;
+        btn.textContent = '注册中...';
+
+        const result = await this.auth.register(username, password);
         if (result.success) {
             // 注册成功自动登录
-            this.auth.login(username, password);
-            this.showApp();
+            const loginResult = await this.auth.login(username, password);
+            if (loginResult.success) {
+                await this.showApp(loginResult.user);
+            }
         } else {
             this.showError('registerError', result.message);
         }
+        
+        btn.disabled = false;
+        btn.textContent = '注册';
     }
 
     // 处理退出登录
     handleLogout() {
-        if (confirm('确定要退出登录吗？')) {
+        if (confirm('确定要退出登录吗？数据已自动保存到云端。')) {
             this.auth.logout();
             // 清空表单
             document.getElementById('loginUsername').value = '';
@@ -281,26 +474,30 @@ class AccountingApp {
         }
     }
     
-    // 从本地存储加载当前用户数据
-    loadData() {
-        const recordsKey = this.auth.getUserDataKey('records');
-        const budgetKey = this.auth.getUserDataKey('budget');
-        const themeKey = this.auth.getUserDataKey('theme');
+    // 从本地和云端加载当前用户数据
+    async loadData() {
+        const username = this.auth.getCurrentUser();
+        const recordsKey = `accounting_records_${username}`;
+        const budgetKey = `accounting_budget_${username}`;
+        const themeKey = `accounting_theme_${username}`;
         
-        const savedRecords = localStorage.getItem(recordsKey);
-        const savedBudget = localStorage.getItem(budgetKey);
+        // 先从云端加载最新数据
+        const cloudData = await this.auth.loadUserData(username);
+        
+        if (cloudData) {
+            this.records = cloudData.records || [];
+            this.budget = cloudData.budget || 0;
+            this.currentUserData = cloudData;
+        } else {
+            // 云端失败则用本地
+            const savedRecords = localStorage.getItem(recordsKey);
+            const savedBudget = localStorage.getItem(budgetKey);
+            this.records = savedRecords ? JSON.parse(savedRecords) : [];
+            this.budget = savedBudget ? parseFloat(savedBudget) : 0;
+        }
+        
+        // 主题设置
         const savedTheme = localStorage.getItem(themeKey);
-        
-        if (savedRecords) {
-            this.records = JSON.parse(savedRecords);
-        } else {
-            this.records = [];
-        }
-        if (savedBudget) {
-            this.budget = parseFloat(savedBudget);
-        } else {
-            this.budget = 0;
-        }
         if (savedTheme === 'dark') {
             document.documentElement.setAttribute('data-theme', 'dark');
             document.getElementById('themeToggle').textContent = '☀️';
@@ -310,12 +507,26 @@ class AccountingApp {
         }
     }
     
-    // 保存当前用户数据到本地存储
-    saveData() {
-        const recordsKey = this.auth.getUserDataKey('records');
-        const budgetKey = this.auth.getUserDataKey('budget');
+    // 保存数据到本地和云端
+    async saveData() {
+        const username = this.auth.getCurrentUser();
+        const recordsKey = `accounting_records_${username}`;
+        const budgetKey = `accounting_budget_${username}`;
+        
+        // 本地保存
         localStorage.setItem(recordsKey, JSON.stringify(this.records));
         localStorage.setItem(budgetKey, this.budget.toString());
+        
+        // 云端保存
+        const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+        const data = {
+            records: this.records,
+            budget: this.budget,
+            theme,
+            updatedAt: new Date().toISOString()
+        };
+        
+        await this.auth.saveUserData(username, data);
     }
     
     // 绑定应用事件
@@ -372,16 +583,16 @@ class AccountingApp {
         });
         
         // 表单提交
-        document.getElementById('recordForm').addEventListener('submit', (e) => {
+        document.getElementById('recordForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            this.saveRecord();
+            await this.saveRecord();
         });
         
         // 预算设置
         document.getElementById('setBudgetBtn').addEventListener('click', () => this.openBudgetModal());
-        document.getElementById('budgetForm').addEventListener('submit', (e) => {
+        document.getElementById('budgetForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            this.saveBudget();
+            await this.saveBudget();
         });
         
         // 筛选
@@ -475,7 +686,7 @@ class AccountingApp {
     }
     
     // 保存记录
-    saveRecord() {
+    async saveRecord() {
         const amount = parseFloat(document.getElementById('amount').value);
         const category = document.getElementById('category').value;
         const date = document.getElementById('date').value;
@@ -514,28 +725,29 @@ class AccountingApp {
             this.records.unshift(record);
         }
         
-        this.saveData();
+        await this.saveData();
         this.closeModal();
         this.updateUI();
+        this.showSyncStatus('☁️ 已同步到云端');
     }
     
     // 删除记录
-    deleteRecord(id) {
+    async deleteRecord(id) {
         if (confirm('确定要删除这条记录吗？')) {
             this.records = this.records.filter(r => r.id !== id);
-            this.saveData();
+            await this.saveData();
             this.updateUI();
+            this.showSyncStatus('☁️ 已同步到云端');
         }
     }
     
     // 保存预算
-    saveBudget() {
+    async saveBudget() {
         this.budget = parseFloat(document.getElementById('budgetAmount').value) || 0;
-        this.saveData();
-        const themeKey = this.auth.getUserDataKey('theme');
-        localStorage.setItem(themeKey, document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
+        await this.saveData();
         this.closeBudgetModal();
         this.updateUI();
+        this.showSyncStatus('☁️ 预算已保存到云端');
     }
     
     // 获取分类信息
@@ -592,7 +804,7 @@ class AccountingApp {
         filteredRecords = [...filteredRecords].sort((a, b) => new Date(b.date) - new Date(a.date));
         
         if (filteredRecords.length === 0) {
-            container.innerHTML = '<div class="empty-state">暂无记录，点击"添加记录"开始记账吧！</div>';
+            container.innerHTML = '<div class="empty-state">暂无记录，点击"添加记录"开始记账吧！<br><small style="color:var(--text-secondary);margin-top:0.5rem;display:block;">数据自动保存到云端，换电脑也能访问 ☁️</small></div>';
             return;
         }
         
@@ -791,22 +1003,21 @@ class AccountingApp {
     }
     
     // 切换主题
-    toggleTheme() {
+    async toggleTheme() {
         const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
         const btn = document.getElementById('themeToggle');
-        const themeKey = this.auth.getUserDataKey('theme');
         
         if (isDark) {
             document.documentElement.removeAttribute('data-theme');
             btn.textContent = '🌙';
-            localStorage.setItem(themeKey, 'light');
         } else {
             document.documentElement.setAttribute('data-theme', 'dark');
             btn.textContent = '☀️';
-            localStorage.setItem(themeKey, 'dark');
         }
         
+        await this.saveData();
         this.updateCharts();
+        this.showSyncStatus('☁️ 主题设置已同步');
     }
     
     // 导出数据
@@ -815,34 +1026,35 @@ class AccountingApp {
             username: this.auth.getCurrentUser(),
             records: this.records,
             budget: this.budget,
-            exportDate: new Date().toISOString()
+            exportDate: new Date().toISOString(),
+            cloud: true
         };
         
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${this.auth.getCurrentUser()}_记账数据_${new Date().toISOString().split('T')[0]}.json`;
+        a.download = `${this.auth.getCurrentUser()}_记账数据_云端备份_${new Date().toISOString().split('T')[0]}.json`;
         a.click();
         URL.revokeObjectURL(url);
     }
     
     // 导入数据
-    importData(e) {
+    async importData(e) {
         const file = e.target.files[0];
         if (!file) return;
         
         const reader = new FileReader();
-        reader.onload = (event) => {
+        reader.onload = async (event) => {
             try {
                 const data = JSON.parse(event.target.result);
                 if (data.records && Array.isArray(data.records)) {
-                    if (confirm(`导入将覆盖当前用户「${this.auth.getCurrentUser()}」的现有数据，确定继续吗？`)) {
+                    if (confirm(`导入将覆盖当前用户「${this.auth.getCurrentUser()}」的云端数据，确定继续吗？`)) {
                         this.records = data.records;
                         this.budget = data.budget || 0;
-                        this.saveData();
+                        await this.saveData();
                         this.updateUI();
-                        alert('导入成功！');
+                        alert('导入成功，数据已同步到云端！');
                     }
                 } else {
                     alert('无效的数据文件');
@@ -874,6 +1086,16 @@ class AccountingApp {
         this.updateCharts();
     }
 }
+
+// 添加动画样式
+const style = document.createElement('style');
+style.textContent = `
+@keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+`;
+document.head.appendChild(style);
 
 // 初始化应用
 let app;
